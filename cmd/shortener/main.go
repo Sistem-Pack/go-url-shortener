@@ -29,7 +29,7 @@ func postProcessing(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	id, err := shortid.Generate()
+	id, _ := shortid.Generate()
 	urlStorage[id] = string(body)
 
 	shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
