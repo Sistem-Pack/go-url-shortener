@@ -4,47 +4,59 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/Sistem-Pack/go-url-shortener/pkg/shortid"
+	"github.com/go-chi/chi/v5"
 )
 
 var urlStorage = make(map[string]string)
 
-func checkRequestMethod(res http.ResponseWriter, req *http.Request) {
-	switch req.Method {
-	case http.MethodPost:
-		postProcessing(res, req)
-	case http.MethodGet:
-		getProcessing(res, req)
-	default:
-		http.Error(res, "Метод не поддерживается", http.StatusMethodNotAllowed)
-		return
-	}
-}
-
 func postProcessing(res http.ResponseWriter, req *http.Request) {
 	body, err := io.ReadAll(req.Body)
-	if err != nil || len(body) == 0 {
-		http.Error(res, "Некорректное тело запроса", http.StatusBadRequest)
+	if err != nil {
+		http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
+		return
+	}
+
+	originalURL := strings.TrimSpace(string(body))
+	if originalURL == "" {
+		http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
+		http.Error(res, "Некорректное тело запроса. URL должен начинаться с http:// или https://", http.StatusBadRequest)
+		return
+	}
+
+	parsed, err := url.Parse(originalURL)
+	if err != nil || parsed.Host == "" {
+		http.Error(res, "Некорректный URL", http.StatusBadRequest)
 		return
 	}
 
 	id, _ := shortid.Generate()
-	urlStorage[id] = string(body)
+	urlStorage[id] = originalURL
 
 	shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
 
-	res.WriteHeader(http.StatusCreated)
 	res.Header().Set("Content-Type", "text/plain")
 	res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
+	res.WriteHeader(http.StatusCreated)
 	res.Write([]byte(shortURL))
 }
 
 func getProcessing(res http.ResponseWriter, req *http.Request) {
-	id := req.URL.Path[1:]
+	id := chi.URLParam(req, "id")
+	if id == "" {
+		http.Error(res, "Некорректный ID", http.StatusBadRequest)
+		return
+	}
 
 	originalURL, located := urlStorage[id]
-	if !located || id == "" {
+	if !located {
 		http.Error(res, "Некорректный ID", http.StatusBadRequest)
 		return
 	}
@@ -54,10 +66,11 @@ func getProcessing(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc(`/`, checkRequestMethod)
+	router := chi.NewRouter()
+	router.Get("/{id}", getProcessing)
+	router.Post("/", postProcessing)
 
-	err := http.ListenAndServe(`:8080`, mux)
+	err := http.ListenAndServe(`:8080`, router)
 	if err != nil {
 		panic(err)
 	}
