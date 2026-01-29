@@ -65,6 +65,7 @@ func TestPostProcessingEmptyBody(t *testing.T) {
 	postProcessing(w, req)
 
 	resp := w.Result()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("Ожидалось %d, получено %d", http.StatusBadRequest, resp.StatusCode)
 	}
@@ -79,6 +80,7 @@ func TestGetProcessingWrongID(t *testing.T) {
 	getProcessing(w, req)
 
 	resp := w.Result()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("Ожидалось %d, получено %d", http.StatusBadRequest, resp.StatusCode)
 	}
