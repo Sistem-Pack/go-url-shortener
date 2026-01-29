@@ -66,6 +66,7 @@ func getProcessing(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+
 	router := chi.NewRouter()
 	router.Get("/{id}", getProcessing)
 	router.Post("/", postProcessing)
