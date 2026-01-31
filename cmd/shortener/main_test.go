@@ -7,16 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestPostHandler(t *testing.T) {
+	storage := make(map[string]string)
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+
+	handler := postProcessing(cfg, storage)
+
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
-
 	w := httptest.NewRecorder()
 
-	postProcessing(w, req)
+	handler(w, req)
 
 	resp := w.Result()
 	defer resp.Body.Close()
@@ -35,7 +40,6 @@ func TestPostHandler(t *testing.T) {
 
 func TestGetHandler(t *testing.T) {
 	router := chi.NewRouter()
-	router.Post("/", postProcessing)
 	router.Get("/{id}", getProcessing)
 
 	urlStorage["abc123"] = "https://practicum.yandex.ru/"
@@ -59,13 +63,19 @@ func TestGetHandler(t *testing.T) {
 }
 
 func TestPostProcessingEmptyBody(t *testing.T) {
+	storage := make(map[string]string)
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+
+	handler := postProcessing(cfg, storage)
+
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()
 
-	postProcessing(w, req)
+	handler(w, req)
 
 	resp := w.Result()
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("Ожидалось %d, получено %d", http.StatusBadRequest, resp.StatusCode)
 	}

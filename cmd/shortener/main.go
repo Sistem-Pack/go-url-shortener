@@ -17,39 +17,41 @@ var (
 	appConfig  *config.Config
 )
 
-func postProcessing(res http.ResponseWriter, req *http.Request) {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
-		return
+func postProcessing(cfg *config.Config, storage map[string]string) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
+			return
+		}
+
+		originalURL := strings.TrimSpace(string(body))
+		if originalURL == "" {
+			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
+			return
+		}
+
+		if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
+			http.Error(res, "Некорректное тело запроса. URL должен начинаться с http:// или https://", http.StatusBadRequest)
+			return
+		}
+
+		parsed, err := url.Parse(originalURL)
+		if err != nil || parsed.Host == "" {
+			http.Error(res, "Некорректный URL", http.StatusBadRequest)
+			return
+		}
+
+		id, _ := shortid.Generate()
+		shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(cfg.BaseURL, "/"), id)
+		storage[id] = originalURL
+
+		res.Header().Set("Content-Type", "text/plain")
+		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
+		res.WriteHeader(http.StatusCreated)
+		res.Write([]byte(shortURL))
 	}
-
-	originalURL := strings.TrimSpace(string(body))
-	if originalURL == "" {
-		http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
-		return
-	}
-
-	if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
-		http.Error(res, "Некорректное тело запроса. URL должен начинаться с http:// или https://", http.StatusBadRequest)
-		return
-	}
-
-	parsed, err := url.Parse(originalURL)
-	if err != nil || parsed.Host == "" {
-		http.Error(res, "Некорректный URL", http.StatusBadRequest)
-		return
-	}
-
-	id, _ := shortid.Generate()
-	urlStorage[id] = originalURL
-
-	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(appConfig.BaseURL, "/"), id)
-
-	res.Header().Set("Content-Type", "text/plain")
-	res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
-	res.WriteHeader(http.StatusCreated)
-	res.Write([]byte(shortURL))
 }
 
 func getProcessing(res http.ResponseWriter, req *http.Request) {
