@@ -74,8 +74,8 @@ func getProcessing(res http.ResponseWriter, req *http.Request) {
 func main() {
 	appConfig = config.Init()
 	router := chi.NewRouter()
+	router.Post("/", postProcessing(appConfig, urlStorage))
 	router.Get("/{id}", getProcessing)
-	router.Post("/", postProcessing)
 
 	if err := http.ListenAndServe(appConfig.Address, router); err != nil {
 		panic(err)
