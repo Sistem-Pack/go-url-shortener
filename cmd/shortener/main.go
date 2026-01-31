@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	urlStorage map[string]string
+	urlStorage = make(map[string]string)
 	appConfig  *config.Config
 )
 
@@ -44,7 +44,6 @@ func postProcessing(res http.ResponseWriter, req *http.Request) {
 	id, _ := shortid.Generate()
 	urlStorage[id] = originalURL
 
-	//shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
 	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(appConfig.BaseURL, "/"), id)
 
 	res.Header().Set("Content-Type", "text/plain")
@@ -71,7 +70,6 @@ func getProcessing(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	urlStorage = make(map[string]string)
 	appConfig = config.Init()
 	router := chi.NewRouter()
 	router.Get("/{id}", getProcessing)
