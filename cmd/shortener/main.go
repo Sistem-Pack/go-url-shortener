@@ -7,11 +7,15 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/shortid"
 	"github.com/go-chi/chi/v5"
 )
 
-var urlStorage = make(map[string]string)
+var (
+	urlStorage map[string]string
+	appConfig  *config.Config
+)
 
 func postProcessing(res http.ResponseWriter, req *http.Request) {
 	body, err := io.ReadAll(req.Body)
@@ -40,7 +44,8 @@ func postProcessing(res http.ResponseWriter, req *http.Request) {
 	id, _ := shortid.Generate()
 	urlStorage[id] = originalURL
 
-	shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
+	//shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
+	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(appConfig.BaseURL, "/"), id)
 
 	res.Header().Set("Content-Type", "text/plain")
 	res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
@@ -66,12 +71,13 @@ func getProcessing(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	urlStorage = make(map[string]string)
+	appConfig = config.Init()
 	router := chi.NewRouter()
 	router.Get("/{id}", getProcessing)
 	router.Post("/", postProcessing)
 
-	err := http.ListenAndServe(`:8080`, router)
-	if err != nil {
+	if err := http.ListenAndServe(appConfig.Address, router); err != nil {
 		panic(err)
 	}
 }
