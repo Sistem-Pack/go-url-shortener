@@ -1,83 +1,20 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"log"
 	"net/http"
-	"net/url"
-	"strings"
 
+	"github.com/Sistem-Pack/go-url-shortener/internal/handler"
+	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
-	"github.com/Sistem-Pack/go-url-shortener/pkg/shortid"
-	"github.com/go-chi/chi/v5"
 )
-
-var (
-	urlStorage = make(map[string]string)
-	appConfig  *config.Config
-)
-
-func postProcessing(cfg *config.Config, storage map[string]string) http.HandlerFunc {
-	return func(res http.ResponseWriter, req *http.Request) {
-
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
-			return
-		}
-
-		originalURL := strings.TrimSpace(string(body))
-		if originalURL == "" {
-			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
-			return
-		}
-
-		if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
-			http.Error(res, "Некорректное тело запроса. URL должен начинаться с http:// или https://", http.StatusBadRequest)
-			return
-		}
-
-		parsed, err := url.Parse(originalURL)
-		if err != nil || parsed.Host == "" {
-			http.Error(res, "Некорректный URL", http.StatusBadRequest)
-			return
-		}
-
-		id, _ := shortid.Generate()
-		shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(cfg.BaseURL, "/"), id)
-		storage[id] = originalURL
-
-		res.Header().Set("Content-Type", "text/plain")
-		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
-		res.WriteHeader(http.StatusCreated)
-		res.Write([]byte(shortURL))
-	}
-}
-
-func getProcessing(res http.ResponseWriter, req *http.Request) {
-	id := chi.URLParam(req, "id")
-	if id == "" {
-		http.Error(res, "Некорректный ID", http.StatusBadRequest)
-		return
-	}
-
-	originalURL, located := urlStorage[id]
-	if !located {
-		http.Error(res, "Некорректный ID", http.StatusBadRequest)
-		return
-	}
-
-	res.Header().Set("Location", originalURL)
-	res.WriteHeader(http.StatusTemporaryRedirect)
-}
 
 func main() {
-	appConfig = config.Init()
-	router := chi.NewRouter()
-	router.Post("/", postProcessing(appConfig, urlStorage))
-	router.Get("/{id}", getProcessing)
+	cfg := config.Init()
+	store := storage.NewMemory()
+	h := handler.NewShortener(cfg, store)
 
-	if err := http.ListenAndServe(appConfig.Address, router); err != nil {
-		panic(err)
-	}
+	router := handler.NewRouter(h)
+
+	log.Fatal(http.ListenAndServe(cfg.Address, router))
 }
