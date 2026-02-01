@@ -7,15 +7,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Sistem-Pack/go-url-shortener/internal/app"
+	"github.com/Sistem-Pack/go-url-shortener/internal/handler"
+	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestPostHandler(t *testing.T) {
-	storage := make(map[string]string)
+	store := storage.NewMemory()
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 
-	handler := postProcessing(cfg, storage)
+	h := handler.NewShortener(cfg, store)
+	handler := h.PostHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -39,14 +43,16 @@ func TestPostHandler(t *testing.T) {
 }
 
 func TestGetHandler(t *testing.T) {
-	router := chi.NewRouter()
-	router.Get("/{id}", getProcessing)
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+	store := storage.NewMemory()
+	store.Set("abc123", "https://practicum.yandex.ru/")
+	h := handler.NewShortener(cfg, store)
 
-	urlStorage["abc123"] = "https://practicum.yandex.ru/"
+	router := chi.NewRouter()
+	router.Get("/{id}", h.GetHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
 
 	resp := w.Result()
@@ -62,16 +68,15 @@ func TestGetHandler(t *testing.T) {
 	}
 }
 
-func TestPostProcessingEmptyBody(t *testing.T) {
-	storage := make(map[string]string)
+func TestPostHandlerEmptyBody(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
-
-	handler := postProcessing(cfg, storage)
+	store := storage.NewMemory()
+	h := handler.NewShortener(cfg, store)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()
 
-	handler(w, req)
+	h.PostHandler()(w, req)
 
 	resp := w.Result()
 	defer resp.Body.Close()
@@ -81,16 +86,19 @@ func TestPostProcessingEmptyBody(t *testing.T) {
 	}
 }
 
-func TestGetProcessingWrongID(t *testing.T) {
-	urlStorage = make(map[string]string)
+func TestGetHandlerWrongID(t *testing.T) {
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+	store := storage.NewMemory()
+
+	router := app.New(cfg, store) // app.New создаёт Shortener внутри
 
 	req := httptest.NewRequest(http.MethodGet, "/wrong", nil)
 	w := httptest.NewRecorder()
-
-	getProcessing(w, req)
+	router.ServeHTTP(w, req)
 
 	resp := w.Result()
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("Ожидалось %d, получено %d", http.StatusBadRequest, resp.StatusCode)
 	}
