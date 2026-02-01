@@ -44,7 +44,7 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 		}
 
 		id, _ := shortid.Generate()
-		shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
+		shortURL, _ := url.JoinPath(h.cfg.BaseURL, id)
 		h.store.Set(id, originalURL)
 
 		res.Header().Set("Content-Type", "text/plain")
