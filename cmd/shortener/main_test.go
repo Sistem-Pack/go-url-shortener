@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sistem-Pack/go-url-shortener/internal/app"
 	"github.com/Sistem-Pack/go-url-shortener/internal/handler"
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
@@ -34,7 +33,11 @@ func TestPostHandler(t *testing.T) {
 		t.Fatalf("Ожидалось 201, получено %d", resp.StatusCode)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Не удалось прочитать тело запроса")
+	}
+
 	shortURL := string(body)
 
 	if !strings.HasPrefix(shortURL, "http://localhost:8080/") {
@@ -90,7 +93,7 @@ func TestGetHandlerWrongID(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
 
-	router := app.New(cfg, store) // app.New создаёт Shortener внутри
+	router := handler.NewRouter(cfg, store)
 
 	req := httptest.NewRequest(http.MethodGet, "/wrong", nil)
 	w := httptest.NewRecorder()

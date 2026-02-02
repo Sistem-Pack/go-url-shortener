@@ -9,8 +9,8 @@ import (
 
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
-	"github.com/Sistem-Pack/go-url-shortener/pkg/shortid"
 	"github.com/go-chi/chi/v5"
+	"github.com/teris-io/shortid"
 )
 
 type Shortener struct {
@@ -43,8 +43,18 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		id, _ := shortid.Generate()
-		shortURL, _ := url.JoinPath(h.cfg.BaseURL, id)
+		id, err := shortid.Generate()
+		if err != nil {
+			http.Error(res, "Ошибка генерации короткого URL", http.StatusInternalServerError)
+			return
+		}
+
+		shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
+		if err != nil {
+			http.Error(res, "Ошибка формирования URL", http.StatusInternalServerError)
+			return
+		}
+
 		h.store.Set(id, originalURL)
 
 		res.Header().Set("Content-Type", "text/plain")
@@ -73,9 +83,10 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 	}
 }
 
-func NewRouter(h *Shortener) http.Handler {
-	r := chi.NewRouter()
-	r.Post("/", h.PostHandler())
-	r.Get("/{id}", h.GetHandler())
-	return r
+func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
+	router := chi.NewRouter()
+	handler := NewShortener(cfg, store)
+	router.Post("/", handler.PostHandler())
+	router.Get("/{id}", handler.GetHandler())
+	return router
 }
