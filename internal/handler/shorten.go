@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Sistem-Pack/go-url-shortener/internal/middleware"
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
@@ -85,6 +86,7 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 
 func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
 	router := chi.NewRouter()
+	router.Use(middleware.Logger)
 	handler := NewShortener(cfg, store)
 	router.Post("/", handler.PostHandler())
 	router.Get("/{id}", handler.GetHandler())
