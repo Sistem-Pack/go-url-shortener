@@ -35,7 +35,7 @@ func NewShortener(cfg *config.Config, store storage.URLStorage) *Shortener {
 func (h *Shortener) createShortURL(originalURL string) (string, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("invalid url")
+		return "", fmt.Errorf("Некорректный URL")
 	}
 
 	id, err := shortid.Generate()
@@ -65,12 +65,6 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 		originalURL := strings.TrimSpace(string(body))
 		if originalURL == "" {
 			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
-			return
-		}
-
-		parsed, err := url.Parse(originalURL)
-		if err != nil || parsed.Host == "" {
-			http.Error(res, "Некорректный URL", http.StatusBadRequest)
 			return
 		}
 
@@ -139,7 +133,7 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 
 func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
 	router := chi.NewRouter()
-	router.Use(middleware.Logger)
+	router.Use(middleware.GzipLoggerMiddleware)
 	handler := NewShortener(cfg, store)
 	router.Post("/", handler.PostHandler())
 	router.Post("/api/shorten", handler.PostJSONHandler())
