@@ -35,7 +35,7 @@ func NewShortener(cfg *config.Config, store storage.URLStorage) *Shortener {
 func (h *Shortener) createShortURL(originalURL string) (string, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("Некорректный URL")
+		return "", fmt.Errorf("некорректный URL")
 	}
 
 	id, err := shortid.Generate()
