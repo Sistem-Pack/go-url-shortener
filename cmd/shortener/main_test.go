@@ -45,6 +45,41 @@ func TestPostHandler(t *testing.T) {
 	}
 }
 
+func TestPostJSONHandler(t *testing.T) {
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+	store := storage.NewMemory()
+
+	router := handler.NewRouter(cfg, store)
+
+	jsonBody := `{"url":"https://practicum.yandex.ru/"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Ожидалось 201, получено %d", resp.StatusCode)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "application/json" {
+		t.Fatalf("Ожидался Content-Type application/json, получено %s", contentType)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Не удалось прочитать тело ответа")
+	}
+
+	if !strings.Contains(string(body), `"result":"http://localhost:8080/`) {
+		t.Fatalf("Неправильный JSON ответ: %s", body)
+	}
+}
+
 func TestGetHandler(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
