@@ -40,7 +40,7 @@ func GzipLoggerMiddleware(next http.Handler) http.Handler {
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gzReader, err := gzip.NewReader(r.Body)
 			if err != nil {
-				http.Error(w, "Ошибка распаковки gzip", http.StatusBadRequest)
+				http.Error(w, "ошибка распаковки gzip", http.StatusBadRequest)
 				return
 			}
 			defer gzReader.Close()
