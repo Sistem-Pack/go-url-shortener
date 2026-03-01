@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Sistem-Pack/go-url-shortener/internal/middleware"
+	"github.com/Sistem-Pack/go-url-shortener/internal/repository"
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,7 @@ import (
 type Shortener struct {
 	cfg   *config.Config
 	store storage.URLStorage
+	db    *repository.PostgresStorage
 }
 
 type shortenRequest struct {
@@ -28,8 +30,12 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
-func NewShortener(cfg *config.Config, store storage.URLStorage) *Shortener {
-	return &Shortener{cfg: cfg, store: store}
+func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) *Shortener {
+	return &Shortener{
+		cfg:   cfg,
+		store: store,
+		db:    db,
+	}
 }
 
 func (h *Shortener) createShortURL(originalURL string) (string, error) {
@@ -131,12 +137,28 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 	}
 }
 
-func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
+func (h *Shortener) PingHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.db == nil {
+			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			return
+		}
+		if err := h.db.Ping(); err != nil {
+			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+}
+
+func NewRouter(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.GzipLoggerMiddleware)
-	handler := NewShortener(cfg, store)
+	handler := NewShortener(cfg, store, db)
 	router.Post("/", handler.PostHandler())
 	router.Post("/api/shorten", handler.PostJSONHandler())
+	router.Get("/ping", handler.PingHandler())
 	router.Get("/{id}", handler.GetHandler())
 	return router
 }
