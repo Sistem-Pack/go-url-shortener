@@ -17,7 +17,7 @@ func TestPostHandler(t *testing.T) {
 	store := storage.NewMemory()
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 
-	h := handler.NewShortener(cfg, store)
+	h := handler.NewShortener(cfg, store, nil)
 	handler := h.PostHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
@@ -49,7 +49,7 @@ func TestPostJSONHandler(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
 
-	router := handler.NewRouter(cfg, store)
+	router := handler.NewRouter(cfg, store, nil)
 
 	jsonBody := `{"url":"https://practicum.yandex.ru/"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(jsonBody))
@@ -84,7 +84,7 @@ func TestGetHandler(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
 	store.Set("abc123", "https://practicum.yandex.ru/")
-	h := handler.NewShortener(cfg, store)
+	h := handler.NewShortener(cfg, store, nil)
 
 	router := chi.NewRouter()
 	router.Get("/{id}", h.GetHandler())
@@ -109,7 +109,7 @@ func TestGetHandler(t *testing.T) {
 func TestPostHandlerEmptyBody(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
-	h := handler.NewShortener(cfg, store)
+	h := handler.NewShortener(cfg, store, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()
@@ -128,7 +128,7 @@ func TestGetHandlerWrongID(t *testing.T) {
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	store := storage.NewMemory()
 
-	router := handler.NewRouter(cfg, store)
+	router := handler.NewRouter(cfg, store, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/wrong", nil)
 	w := httptest.NewRecorder()
