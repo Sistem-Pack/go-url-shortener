@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/Sistem-Pack/go-url-shortener/internal/middleware"
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
@@ -18,8 +20,37 @@ type Shortener struct {
 	store storage.URLStorage
 }
 
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
+}
+
 func NewShortener(cfg *config.Config, store storage.URLStorage) *Shortener {
 	return &Shortener{cfg: cfg, store: store}
+}
+
+func (h *Shortener) createShortURL(originalURL string) (string, error) {
+	parsed, err := url.Parse(originalURL)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("некорректный URL")
+	}
+
+	id, err := shortid.Generate()
+	if err != nil {
+		return "", err
+	}
+
+	shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
+	if err != nil {
+		return "", err
+	}
+
+	h.store.Set(id, originalURL)
+
+	return shortURL, nil
 }
 
 func (h *Shortener) PostHandler() http.HandlerFunc {
@@ -37,30 +68,47 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		parsed, err := url.Parse(originalURL)
-		if err != nil || parsed.Host == "" {
+		shortURL, err := h.createShortURL(originalURL)
+		if err != nil {
 			http.Error(res, "Некорректный URL", http.StatusBadRequest)
 			return
 		}
-
-		id, err := shortid.Generate()
-		if err != nil {
-			http.Error(res, "Ошибка генерации короткого URL", http.StatusInternalServerError)
-			return
-		}
-
-		shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
-		if err != nil {
-			http.Error(res, "Ошибка формирования URL", http.StatusInternalServerError)
-			return
-		}
-
-		h.store.Set(id, originalURL)
 
 		res.Header().Set("Content-Type", "text/plain")
 		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
 		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))
+	}
+}
+
+func (h *Shortener) PostJSONHandler() http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+
+		var req shortenRequest
+
+		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+			http.Error(responseWriter, "Некорректный JSON", http.StatusBadRequest)
+			return
+		}
+
+		if strings.TrimSpace(req.URL) == "" {
+			http.Error(responseWriter, "Пустой URL", http.StatusBadRequest)
+			return
+		}
+
+		shortURL, err := h.createShortURL(req.URL)
+		if err != nil {
+			http.Error(responseWriter, "Некорректный URL", http.StatusBadRequest)
+			return
+		}
+
+		resp := shortenResponse{
+			Result: shortURL,
+		}
+
+		responseWriter.Header().Set("Content-Type", "application/json")
+		responseWriter.WriteHeader(http.StatusCreated)
+		json.NewEncoder(responseWriter).Encode(resp)
 	}
 }
 
@@ -85,8 +133,10 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 
 func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
 	router := chi.NewRouter()
+	router.Use(middleware.GzipLoggerMiddleware)
 	handler := NewShortener(cfg, store)
 	router.Post("/", handler.PostHandler())
+	router.Post("/api/shorten", handler.PostJSONHandler())
 	router.Get("/{id}", handler.GetHandler())
 	return router
 }
