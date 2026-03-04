@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"sync"
 )
@@ -10,6 +11,7 @@ import (
 type URLStorage interface {
 	Set(id, original string) error
 	Get(id string) (string, bool)
+	SetBatch(data map[string]string) error
 }
 
 type Memory struct {
@@ -138,5 +140,27 @@ func (fs *FileStorage) loadFromFile() error {
 	}
 	fs.lastID = maxID
 
+	return nil
+}
+
+func (fs *FileStorage) SetBatch(data map[string]string) error {
+	fs.mu.Lock()
+	for short, original := range data {
+		fs.lastID++
+		fs.data[short] = original
+	}
+
+	dataCopy := make(map[string]string, len(fs.data))
+	maps.Copy(dataCopy, fs.data)
+	fs.mu.Unlock()
+
+	return fs.saveToFile(dataCopy)
+}
+
+func (m *Memory) SetBatch(data map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	maps.Copy(m.data, data)
 	return nil
 }

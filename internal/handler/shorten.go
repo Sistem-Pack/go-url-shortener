@@ -31,6 +31,16 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+type batchRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+type batchResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
 func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) *Shortener {
 	return &Shortener{
 		cfg:   cfg,
@@ -170,12 +180,58 @@ func (h *Shortener) PingHandler() http.HandlerFunc {
 	}
 }
 
+func (h *Shortener) PostBatchHandler() http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		var reqData []batchRequest
+		if err := json.NewDecoder(req.Body).Decode(&reqData); err != nil {
+			http.Error(res, "Некорректный JSON", http.StatusBadRequest)
+			return
+		}
+
+		respData := make([]batchResponse, 0, len(reqData))
+		dbData := make(map[string]string)
+
+		for _, item := range reqData {
+			id, err := shortid.Generate()
+			if err != nil {
+				http.Error(res, "Ошибка генерации ID", http.StatusInternalServerError)
+				return
+			}
+
+			shortURL, _ := url.JoinPath(h.cfg.BaseURL, id)
+
+			respData = append(respData, batchResponse{
+				CorrelationID: item.CorrelationID,
+				ShortURL:      shortURL,
+			})
+
+			dbData[id] = item.OriginalURL
+		}
+
+		if h.db != nil {
+			if err := h.db.SaveBatch(req.Context(), dbData); err != nil {
+				http.Error(res, "Ошибка сохранения в БД", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			for id, originalURL := range dbData {
+				h.store.Set(id, originalURL)
+			}
+		}
+
+		res.Header().Set("Content-Type", "application/json")
+		res.WriteHeader(http.StatusCreated)
+		json.NewEncoder(res).Encode(respData)
+	}
+}
+
 func NewRouter(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.GzipLoggerMiddleware)
 	handler := NewShortener(cfg, store, db)
 	router.Post("/", handler.PostHandler())
 	router.Post("/api/shorten", handler.PostJSONHandler())
+	router.Post("/api/shorten/batch", handler.PostBatchHandler())
 	router.Get("/ping", handler.PingHandler())
 	router.Get("/{id}", handler.GetHandler())
 	return router
