@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,12 +50,19 @@ func (h *Shortener) createShortURL(originalURL string) (string, error) {
 		return "", err
 	}
 
+	if h.db != nil {
+		err := h.db.SaveURL(context.Background(), id, originalURL)
+		if err != nil {
+			return "", fmt.Errorf("ошибка сохранения в БД: %w", err)
+		}
+	} else {
+		h.store.Set(id, originalURL)
+	}
+
 	shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
 	if err != nil {
 		return "", err
 	}
-
-	h.store.Set(id, originalURL)
 
 	return shortURL, nil
 }
@@ -126,8 +134,18 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 			return
 		}
 
-		originalURL, ok := h.store.Get(id)
-		if !ok {
+		var originalURL string
+		var exists bool
+
+		if h.db != nil {
+			var err error
+			originalURL, err = h.db.GetURL(r.Context(), id)
+			exists = (err == nil)
+		} else {
+			originalURL, exists = h.store.Get(id)
+		}
+
+		if !exists {
 			http.Error(w, "Некорректный ID", http.StatusBadRequest)
 			return
 		}
