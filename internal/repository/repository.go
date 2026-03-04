@@ -68,3 +68,25 @@ func (p *PostgresStorage) GetURL(ctx context.Context, id string) (string, error)
 	}
 	return originalURL, nil
 }
+
+func (p *PostgresStorage) SaveBatch(ctx context.Context, data map[string]string) error {
+	tx, err := p.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (id, original_url) VALUES ($1, $2)")
+	if err != nil {
+		return fmt.Errorf("prepare stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	for id, originalURL := range data {
+		if _, err := stmt.ExecContext(ctx, id, originalURL); err != nil {
+			return fmt.Errorf("exec stmt: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
