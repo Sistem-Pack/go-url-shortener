@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -50,4 +51,20 @@ func RunMigrations(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+func (p *PostgresStorage) SaveURL(ctx context.Context, id string, originalURL string) error {
+	query := `INSERT INTO urls (id, original_url) VALUES ($1, $2)`
+	_, err := p.DB.ExecContext(ctx, query, id, originalURL)
+	return err
+}
+
+func (p *PostgresStorage) GetURL(ctx context.Context, id string) (string, error) {
+	var originalURL string
+	query := `SELECT original_url FROM urls WHERE id = $1`
+	err := p.DB.QueryRowContext(ctx, query, id).Scan(&originalURL)
+	if err != nil {
+		return "", err
+	}
+	return originalURL, nil
 }
