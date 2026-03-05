@@ -12,6 +12,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+var ErrConflict = errors.New("url conflict")
+
 type PostgresStorage struct {
 	DB *sql.DB
 }
@@ -54,9 +56,30 @@ func RunMigrations(db *sql.DB) error {
 }
 
 func (p *PostgresStorage) SaveURL(ctx context.Context, id string, originalURL string) error {
-	query := `INSERT INTO urls (id, original_url) VALUES ($1, $2)`
-	_, err := p.DB.ExecContext(ctx, query, id, originalURL)
+	query := `INSERT INTO urls (id, original_url) VALUES ($1, $2) ON CONFLICT (original_url) DO NOTHING`
+
+	result, err := p.DB.ExecContext(ctx, query, id, originalURL)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return ErrConflict
+	}
+
 	return err
+}
+
+func (p *PostgresStorage) GetIDByPath(ctx context.Context, originalURL string) (string, error) {
+	var id string
+	query := `SELECT id FROM urls WHERE original_url = $1`
+	err := p.DB.QueryRowContext(ctx, query, originalURL).Scan(&id)
+	return id, err
 }
 
 func (p *PostgresStorage) GetURL(ctx context.Context, id string) (string, error) {
@@ -76,7 +99,7 @@ func (p *PostgresStorage) SaveBatch(ctx context.Context, data map[string]string)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (id, original_url) VALUES ($1, $2)")
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO urls (id, original_url) VALUES ($1, $2) ON CONFLICT (original_url) DO NOTHING")
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
 	}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,21 +50,29 @@ func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.P
 	}
 }
 
-func (h *Shortener) createShortURL(originalURL string) (string, error) {
+func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (string, bool, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("некорректный URL")
+		return "", false, fmt.Errorf("некорректный URL")
 	}
 
 	id, err := shortid.Generate()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
+	var isConflict bool
+
 	if h.db != nil {
-		err := h.db.SaveURL(context.Background(), id, originalURL)
-		if err != nil {
-			return "", fmt.Errorf("ошибка сохранения в БД: %w", err)
+		if errors.Is(err, repository.ErrConflict) {
+			oldID, errGet := h.db.GetIDByPath(ctx, originalURL)
+			if errGet != nil {
+				return "", false, errGet
+			}
+			id = oldID
+			isConflict = true
+		} else if err != nil {
+			return "", false, err
 		}
 	} else {
 		h.store.Set(id, originalURL)
@@ -71,10 +80,10 @@ func (h *Shortener) createShortURL(originalURL string) (string, error) {
 
 	shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return shortURL, nil
+	return shortURL, isConflict, nil
 }
 
 func (h *Shortener) PostHandler() http.HandlerFunc {
@@ -92,7 +101,7 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(originalURL)
+		shortURL, isConflict, err := h.createShortURL(req.Context(), originalURL)
 		if err != nil {
 			http.Error(res, "Некорректный URL", http.StatusBadRequest)
 			return
@@ -100,7 +109,11 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 
 		res.Header().Set("Content-Type", "text/plain")
 		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
-		res.WriteHeader(http.StatusCreated)
+		if isConflict {
+			res.WriteHeader(http.StatusConflict)
+		} else {
+			res.WriteHeader(http.StatusCreated)
+		}
 		res.Write([]byte(shortURL))
 	}
 }
@@ -120,7 +133,7 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(req.URL)
+		shortURL, isConflict, err := h.createShortURL(request.Context(), req.URL)
 		if err != nil {
 			http.Error(responseWriter, "Некорректный URL", http.StatusBadRequest)
 			return
@@ -131,7 +144,11 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 		}
 
 		responseWriter.Header().Set("Content-Type", "application/json")
-		responseWriter.WriteHeader(http.StatusCreated)
+		if isConflict {
+			responseWriter.WriteHeader(http.StatusConflict)
+		} else {
+			responseWriter.WriteHeader(http.StatusCreated)
+		}
 		json.NewEncoder(responseWriter).Encode(resp)
 	}
 }
@@ -198,7 +215,10 @@ func (h *Shortener) PostBatchHandler() http.HandlerFunc {
 				return
 			}
 
-			shortURL, _ := url.JoinPath(h.cfg.BaseURL, id)
+			shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
+			if err != nil {
+				return
+			}
 
 			respData = append(respData, batchResponse{
 				CorrelationID: item.CorrelationID,
