@@ -64,6 +64,7 @@ func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (str
 	var isConflict bool
 
 	if h.db != nil {
+		err = h.db.SaveURL(ctx, id, originalURL)
 		if errors.Is(err, repository.ErrConflict) {
 			oldID, errGet := h.db.GetIDByPath(ctx, originalURL)
 			if errGet != nil {
