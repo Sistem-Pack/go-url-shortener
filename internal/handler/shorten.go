@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Sistem-Pack/go-url-shortener/internal/middleware"
+	"github.com/Sistem-Pack/go-url-shortener/internal/repository"
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
@@ -18,6 +21,7 @@ import (
 type Shortener struct {
 	cfg   *config.Config
 	store storage.URLStorage
+	db    *repository.PostgresStorage
 }
 
 type shortenRequest struct {
@@ -28,29 +32,59 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
-func NewShortener(cfg *config.Config, store storage.URLStorage) *Shortener {
-	return &Shortener{cfg: cfg, store: store}
+type batchRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
 }
 
-func (h *Shortener) createShortURL(originalURL string) (string, error) {
+type batchResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
+func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) *Shortener {
+	return &Shortener{
+		cfg:   cfg,
+		store: store,
+		db:    db,
+	}
+}
+
+func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (string, bool, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("некорректный URL")
+		return "", false, fmt.Errorf("некорректный URL")
 	}
 
 	id, err := shortid.Generate()
 	if err != nil {
-		return "", err
+		return "", false, err
+	}
+
+	var isConflict bool
+
+	if h.db != nil {
+		err = h.db.SaveURL(ctx, id, originalURL)
+		if errors.Is(err, repository.ErrConflict) {
+			oldID, errGet := h.db.GetIDByPath(ctx, originalURL)
+			if errGet != nil {
+				return "", false, errGet
+			}
+			id = oldID
+			isConflict = true
+		} else if err != nil {
+			return "", false, err
+		}
+	} else {
+		h.store.Set(id, originalURL)
 	}
 
 	shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	h.store.Set(id, originalURL)
-
-	return shortURL, nil
+	return shortURL, isConflict, nil
 }
 
 func (h *Shortener) PostHandler() http.HandlerFunc {
@@ -68,7 +102,7 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(originalURL)
+		shortURL, isConflict, err := h.createShortURL(req.Context(), originalURL)
 		if err != nil {
 			http.Error(res, "Некорректный URL", http.StatusBadRequest)
 			return
@@ -76,7 +110,11 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 
 		res.Header().Set("Content-Type", "text/plain")
 		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
-		res.WriteHeader(http.StatusCreated)
+		if isConflict {
+			res.WriteHeader(http.StatusConflict)
+		} else {
+			res.WriteHeader(http.StatusCreated)
+		}
 		res.Write([]byte(shortURL))
 	}
 }
@@ -96,7 +134,7 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(req.URL)
+		shortURL, isConflict, err := h.createShortURL(request.Context(), req.URL)
 		if err != nil {
 			http.Error(responseWriter, "Некорректный URL", http.StatusBadRequest)
 			return
@@ -107,7 +145,11 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 		}
 
 		responseWriter.Header().Set("Content-Type", "application/json")
-		responseWriter.WriteHeader(http.StatusCreated)
+		if isConflict {
+			responseWriter.WriteHeader(http.StatusConflict)
+		} else {
+			responseWriter.WriteHeader(http.StatusCreated)
+		}
 		json.NewEncoder(responseWriter).Encode(resp)
 	}
 }
@@ -120,8 +162,18 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 			return
 		}
 
-		originalURL, ok := h.store.Get(id)
-		if !ok {
+		var originalURL string
+		var exists bool
+
+		if h.db != nil {
+			var err error
+			originalURL, err = h.db.GetURL(r.Context(), id)
+			exists = (err == nil)
+		} else {
+			originalURL, exists = h.store.Get(id)
+		}
+
+		if !exists {
 			http.Error(w, "Некорректный ID", http.StatusBadRequest)
 			return
 		}
@@ -131,12 +183,77 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 	}
 }
 
-func NewRouter(cfg *config.Config, store storage.URLStorage) http.Handler {
+func (h *Shortener) PingHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.db == nil {
+			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			return
+		}
+		if err := h.db.Ping(); err != nil {
+			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
+}
+
+func (h *Shortener) PostBatchHandler() http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		var reqData []batchRequest
+		if err := json.NewDecoder(req.Body).Decode(&reqData); err != nil {
+			http.Error(res, "Некорректный JSON", http.StatusBadRequest)
+			return
+		}
+
+		respData := make([]batchResponse, 0, len(reqData))
+		dbData := make(map[string]string)
+
+		for _, item := range reqData {
+			id, err := shortid.Generate()
+			if err != nil {
+				http.Error(res, "Ошибка генерации ID", http.StatusInternalServerError)
+				return
+			}
+
+			shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
+			if err != nil {
+				return
+			}
+
+			respData = append(respData, batchResponse{
+				CorrelationID: item.CorrelationID,
+				ShortURL:      shortURL,
+			})
+
+			dbData[id] = item.OriginalURL
+		}
+
+		if h.db != nil {
+			if err := h.db.SaveBatch(req.Context(), dbData); err != nil {
+				http.Error(res, "Ошибка сохранения в БД", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			for id, originalURL := range dbData {
+				h.store.Set(id, originalURL)
+			}
+		}
+
+		res.Header().Set("Content-Type", "application/json")
+		res.WriteHeader(http.StatusCreated)
+		json.NewEncoder(res).Encode(respData)
+	}
+}
+
+func NewRouter(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.GzipLoggerMiddleware)
-	handler := NewShortener(cfg, store)
+	handler := NewShortener(cfg, store, db)
 	router.Post("/", handler.PostHandler())
 	router.Post("/api/shorten", handler.PostJSONHandler())
+	router.Post("/api/shorten/batch", handler.PostBatchHandler())
+	router.Get("/ping", handler.PingHandler())
 	router.Get("/{id}", handler.GetHandler())
 	return router
 }
