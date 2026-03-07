@@ -1,1 +1,1 @@
-CREATE UNIQUE INDEX IF NOT EXISTS idx_original_url ON urls (original_url);
+DROP INDEX IF EXISTS idx_original_url;
