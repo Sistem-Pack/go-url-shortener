@@ -185,10 +185,10 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 					http.Error(w, "Ссылка не найдена", http.StatusNotFound)
 					return
 				}
+				log.Error().Err(err).Str("id", id).Msg("Ошибка при получении URL из БД")
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
 			}
-			log.Error().Err(err).Str("id", id).Msg("Ошибка при получении URL из БД")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
 		} else {
 			var exists bool
 			originalURL, exists = h.store.Get(id)
