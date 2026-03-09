@@ -109,10 +109,14 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			var conflictErr *repository.ErrConflict
 
 			if errors.As(err, &conflictErr) {
-				fullURL, _ := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
-				res.Header().Set("Content-Type", "application/json")
+				fullURL, err := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
+				if err != nil {
+					http.Error(res, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					return
+				}
+				res.Header().Set("Content-Type", "text/plain")
 				res.WriteHeader(http.StatusConflict)
-				json.NewEncoder(res).Encode(shortenResponse{Result: fullURL})
+				res.Write([]byte(fullURL))
 				return
 			}
 			http.Error(res, "Ошибка сервера", http.StatusInternalServerError)
@@ -146,7 +150,11 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			var conflictErr *repository.ErrConflict
 
 			if errors.As(err, &conflictErr) {
-				fullURL, _ := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
+				fullURL, err := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
+				if err != nil {
+					http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					return
+				}
 				responseWriter.Header().Set("Content-Type", "application/json")
 				responseWriter.WriteHeader(http.StatusConflict)
 				json.NewEncoder(responseWriter).Encode(shortenResponse{Result: fullURL})
