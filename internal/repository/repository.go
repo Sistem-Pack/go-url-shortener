@@ -12,7 +12,18 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-var ErrConflict = errors.New("url conflict")
+type ErrConflict struct {
+	Err      error
+	ShortURL string
+}
+
+func (e *ErrConflict) Error() string {
+	return "url already exists: " + e.ShortURL
+}
+
+func (e *ErrConflict) Unwrap() error {
+	return e.Err
+}
 
 type PostgresStorage struct {
 	DB *sql.DB
@@ -69,7 +80,11 @@ func (p *PostgresStorage) SaveURL(ctx context.Context, id string, originalURL st
 	}
 
 	if rows == 0 {
-		return ErrConflict
+		existingID, err := p.GetIDByPath(ctx, originalURL)
+		if err != nil {
+			return err
+		}
+		return &ErrConflict{ShortURL: existingID}
 	}
 
 	return err

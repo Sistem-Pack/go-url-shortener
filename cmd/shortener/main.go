@@ -17,7 +17,7 @@ func main() {
 	if cfg.DBConnectionString != "" {
 		sqlDB, err := repository.OpenDatabase(cfg.DBConnectionString)
 		if err != nil {
-			log.Warn().Err(err).Msg("не удалось подключиться к базе данных")
+			log.Fatal().Err(err).Msg("не удалось подключиться к базе данных")
 		}
 
 		if err := repository.RunMigrations(sqlDB); err != nil {
@@ -29,11 +29,13 @@ func main() {
 	} else if cfg.FileStoragePath != "" {
 		fs, err := storage.NewFileStorage(cfg.FileStoragePath)
 		if err != nil {
-			log.Warn().Err(err).Msg("не удалось прочитать файл с настройками")
+			log.Fatal().Err(err).Msg("не удалось создать файловое хранилище")
 		}
 		store = fs
+		log.Info().Msg("используется файловое хранилище")
 	} else {
 		store = storage.NewMemory()
+		log.Info().Msg("используется хранение в памяти")
 	}
 
 	router := handler.NewRouter(cfg, store, db)

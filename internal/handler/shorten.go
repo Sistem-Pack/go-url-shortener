@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 	"github.com/teris-io/shortid"
 )
 
@@ -50,41 +52,41 @@ func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.P
 	}
 }
 
-func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (string, bool, error) {
+func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (string, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
-		return "", false, fmt.Errorf("некорректный URL")
+		return "", fmt.Errorf("некорректный URL")
 	}
 
-	id, err := shortid.Generate()
-	if err != nil {
-		return "", false, err
-	}
+	const maxRetries = 3
 
-	var isConflict bool
-
-	if h.db != nil {
-		err = h.db.SaveURL(ctx, id, originalURL)
-		if errors.Is(err, repository.ErrConflict) {
-			oldID, errGet := h.db.GetIDByPath(ctx, originalURL)
-			if errGet != nil {
-				return "", false, errGet
-			}
-			id = oldID
-			isConflict = true
-		} else if err != nil {
-			return "", false, err
+	for i := range maxRetries {
+		id, err := shortid.Generate()
+		if err != nil {
+			return "", err
 		}
-	} else {
-		h.store.Set(id, originalURL)
+
+		if h.db != nil {
+			err = h.db.SaveURL(ctx, id, originalURL)
+			if err == nil {
+				return url.JoinPath(h.cfg.BaseURL, id)
+			}
+
+			var conflictErr *repository.ErrConflict
+			if errors.As(err, &conflictErr) {
+				return "", err
+			}
+
+			log.Warn().Err(err).Int("attempt", i+1).Msg("Коллизия ID или ошибка БД, пробуем снова")
+			continue
+		} else {
+			h.store.Set(id, originalURL)
+			return url.JoinPath(h.cfg.BaseURL, id)
+		}
 	}
 
-	shortURL, err := url.JoinPath(h.cfg.BaseURL, id)
-	if err != nil {
-		return "", false, err
-	}
+	return "", fmt.Errorf("превышено количество попыток генерации уникального ID")
 
-	return shortURL, isConflict, nil
 }
 
 func (h *Shortener) PostHandler() http.HandlerFunc {
@@ -102,19 +104,24 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, isConflict, err := h.createShortURL(req.Context(), originalURL)
+		shortURL, err := h.createShortURL(req.Context(), originalURL)
 		if err != nil {
-			http.Error(res, "Некорректный URL", http.StatusBadRequest)
+			var conflictErr *repository.ErrConflict
+
+			if errors.As(err, &conflictErr) {
+				fullURL, _ := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
+				res.Header().Set("Content-Type", "application/json")
+				res.WriteHeader(http.StatusConflict)
+				json.NewEncoder(res).Encode(shortenResponse{Result: fullURL})
+				return
+			}
+			http.Error(res, "Ошибка сервера", http.StatusInternalServerError)
 			return
 		}
 
 		res.Header().Set("Content-Type", "text/plain")
 		res.Header().Set("Content-Length", fmt.Sprintf("%d", len(shortURL)))
-		if isConflict {
-			res.WriteHeader(http.StatusConflict)
-		} else {
-			res.WriteHeader(http.StatusCreated)
-		}
+		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))
 	}
 }
@@ -134,8 +141,17 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, isConflict, err := h.createShortURL(request.Context(), req.URL)
+		shortURL, err := h.createShortURL(request.Context(), req.URL)
 		if err != nil {
+			var conflictErr *repository.ErrConflict
+
+			if errors.As(err, &conflictErr) {
+				fullURL, _ := url.JoinPath(h.cfg.BaseURL, conflictErr.ShortURL)
+				responseWriter.Header().Set("Content-Type", "application/json")
+				responseWriter.WriteHeader(http.StatusConflict)
+				json.NewEncoder(responseWriter).Encode(shortenResponse{Result: fullURL})
+				return
+			}
 			http.Error(responseWriter, "Некорректный URL", http.StatusBadRequest)
 			return
 		}
@@ -145,11 +161,9 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 		}
 
 		responseWriter.Header().Set("Content-Type", "application/json")
-		if isConflict {
-			responseWriter.WriteHeader(http.StatusConflict)
-		} else {
-			responseWriter.WriteHeader(http.StatusCreated)
-		}
+
+		responseWriter.WriteHeader(http.StatusCreated)
+
 		json.NewEncoder(responseWriter).Encode(resp)
 	}
 }
@@ -163,19 +177,25 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 		}
 
 		var originalURL string
-		var exists bool
-
 		if h.db != nil {
 			var err error
 			originalURL, err = h.db.GetURL(r.Context(), id)
-			exists = (err == nil)
-		} else {
-			originalURL, exists = h.store.Get(id)
-		}
-
-		if !exists {
-			http.Error(w, "Некорректный ID", http.StatusBadRequest)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					http.Error(w, "Ссылка не найдена", http.StatusNotFound)
+					return
+				}
+			}
+			log.Error().Err(err).Str("id", id).Msg("Ошибка при получении URL из БД")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
+		} else {
+			var exists bool
+			originalURL, exists = h.store.Get(id)
+			if !exists {
+				http.Error(w, "Некорректный ID", http.StatusBadRequest)
+				return
+			}
 		}
 
 		w.Header().Set("Location", originalURL)
@@ -186,13 +206,19 @@ func (h *Shortener) GetHandler() http.HandlerFunc {
 func (h *Shortener) PingHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.db == nil {
-			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			log.Error().Msg("база данных не инициализирована")
+
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
+
 		if err := h.db.Ping(); err != nil {
-			http.Error(w, "База недоступна", http.StatusInternalServerError)
+			log.Error().Err(err).Msg("не удалось выоплнить проверку соединения с базой данных")
+
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}

@@ -22,19 +22,23 @@ func Init() *Config {
 
 	flag.Parse()
 
-	if envAddress := os.Getenv("SERVER_ADDRESS"); envAddress != "" {
+	envAddress, exists := os.LookupEnv("SERVER_ADDRESS")
+	if exists {
 		cfg.Address = envAddress
 	}
 
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
+	envBaseURL, exists := os.LookupEnv("BASE_URL")
+	if exists {
 		cfg.BaseURL = envBaseURL
 	}
 
-	if envFile := os.Getenv("FILE_STORAGE_PATH"); envFile != "" {
+	envFile, exists := os.LookupEnv("FILE_STORAGE_PATH")
+	if exists {
 		cfg.FileStoragePath = envFile
 	}
 
-	if endDB := os.Getenv("DATABASE_DSN"); endDB != "" {
+	endDB, exists := os.LookupEnv("DATABASE_DSN")
+	if exists {
 		cfg.DBConnectionString = endDB
 	}
 
