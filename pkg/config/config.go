@@ -6,9 +6,10 @@ import (
 )
 
 type Config struct {
-	Address         string
-	BaseURL         string
-	FileStoragePath string
+	Address            string
+	BaseURL            string
+	FileStoragePath    string
+	DBConnectionString string
 }
 
 func Init() *Config {
@@ -17,19 +18,28 @@ func Init() *Config {
 	flag.StringVar(&cfg.Address, "a", "localhost:8080", "HTTP-сервер адрес")
 	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Базовый урл для сокращенных ссылок")
 	flag.StringVar(&cfg.FileStoragePath, "f", "url_storage.json", "Путь к файлу хранения URL")
+	flag.StringVar(&cfg.DBConnectionString, "d", "", "Строка подключения к БД")
 
 	flag.Parse()
 
-	if envAddress := os.Getenv("SERVER_ADDRESS"); envAddress != "" {
+	envAddress, exists := os.LookupEnv("SERVER_ADDRESS")
+	if exists {
 		cfg.Address = envAddress
 	}
 
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
+	envBaseURL, exists := os.LookupEnv("BASE_URL")
+	if exists {
 		cfg.BaseURL = envBaseURL
 	}
 
-	if envFile := os.Getenv("FILE_STORAGE_PATH"); envFile != "" {
+	envFile, exists := os.LookupEnv("FILE_STORAGE_PATH")
+	if exists {
 		cfg.FileStoragePath = envFile
+	}
+
+	endDB, exists := os.LookupEnv("DATABASE_DSN")
+	if exists {
+		cfg.DBConnectionString = endDB
 	}
 
 	return cfg
