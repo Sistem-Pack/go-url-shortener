@@ -113,11 +113,13 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
 			return
 		}
+
 		userID, ok := req.Context().Value(userIDKey).(string)
 		if !ok {
 			http.Error(res, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+
 		shortURL, err := h.createShortURL(req.Context(), originalURL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
@@ -326,12 +328,12 @@ func (h *Shortener) EncryptUserID(userID string) string {
 
 func (h *Shortener) DecryptUserID(signedValue string) (string, error) {
 	data, err := hex.DecodeString(signedValue)
-	if err != nil || len(data) < 16 {
+	if err != nil || len(data) < 36 {
 		return "", errors.New("некорректная кука")
 	}
 
-	userID := string(data[:16])
-	signature := data[16:]
+	userID := string(data[36])
+	signature := data[36:]
 
 	hMac := hmac.New(sha256.New, []byte(secretKey))
 	hMac.Write([]byte(userID))
