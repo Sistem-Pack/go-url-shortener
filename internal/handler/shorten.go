@@ -56,6 +56,10 @@ func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.P
 	}
 }
 
+type contextKey string
+
+const userIDKey contextKey = "userID"
+
 var secretKey = "9vU2OWQPdG7wnNYNb5WoTEkT5T3HiwM9hqpLLwBWm78="
 
 func (h *Shortener) createShortURL(ctx context.Context, originalURL string, userID string) (string, error) {
@@ -109,7 +113,11 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
 			return
 		}
-		userID := req.Context().Value("userID").(string)
+		userID, ok := req.Context().Value(userIDKey).(string)
+		if !ok {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		shortURL, err := h.createShortURL(req.Context(), originalURL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
@@ -151,7 +159,7 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		userID := request.Context().Value("userID").(string)
+		userID := request.Context().Value(userIDKey).(string)
 		shortURL, err := h.createShortURL(request.Context(), req.URL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
@@ -289,7 +297,7 @@ func (h *Shortener) PostBatchHandler() http.HandlerFunc {
 
 func (h *Shortener) GetUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Context().Value("userID").(string)
+		userID := r.Context().Value(userIDKey).(string)
 
 		urls, err := h.db.GetURLsByUserID(r.Context(), userID)
 		if err != nil {
@@ -309,25 +317,25 @@ func (h *Shortener) GetUserURLs() http.HandlerFunc {
 }
 
 func (h *Shortener) EncryptUserID(userID string) string {
-	h_mac := hmac.New(sha256.New, []byte(secretKey))
-	h_mac.Write([]byte(userID))
-	signature := h_mac.Sum(nil)
+	hMac := hmac.New(sha256.New, []byte(secretKey))
+	hMac.Write([]byte(userID))
+	signature := hMac.Sum(nil)
 
 	return hex.EncodeToString(append([]byte(userID), signature...))
 }
 
 func (h *Shortener) DecryptUserID(signedValue string) (string, error) {
 	data, err := hex.DecodeString(signedValue)
-	if err != nil {
-		return "", err
+	if err != nil || len(data) < 16 {
+		return "", errors.New("некорректная кука")
 	}
 
 	userID := string(data[:16])
 	signature := data[16:]
 
-	h_mac := hmac.New(sha256.New, []byte(secretKey))
-	h_mac.Write([]byte(userID))
-	expectedSignature := h_mac.Sum(nil)
+	hMac := hmac.New(sha256.New, []byte(secretKey))
+	hMac.Write([]byte(userID))
+	expectedSignature := hMac.Sum(nil)
 
 	if !hmac.Equal(signature, expectedSignature) {
 		return "", errors.New("неправильная подпись")
@@ -362,7 +370,7 @@ func (h *Shortener) AuthMiddleware(next http.Handler) http.Handler {
 			})
 		}
 
-		ctx := context.WithValue(r.Context(), "userID", userID)
+		ctx := context.WithValue(r.Context(), userIDKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

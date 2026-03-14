@@ -134,10 +134,10 @@ func (p *PostgresStorage) SaveBatch(ctx context.Context, data map[string]string)
 	return tx.Commit()
 }
 
-func (s *PostgresStorage) GetURLsByUserID(ctx context.Context, userID string) ([]ResponseURL, error) {
+func (p *PostgresStorage) GetURLsByUserID(ctx context.Context, userID string) ([]ResponseURL, error) {
 	urls := make([]ResponseURL, 0)
 
-	rows, err := s.DB.QueryContext(ctx, "SELECT short_url, original_url FROM urls WHERE user_id = $1", userID)
+	rows, err := p.DB.QueryContext(ctx, "SELECT short_url, original_url FROM urls WHERE user_id = $1", userID)
 	if err != nil {
 		return nil, err
 	}
