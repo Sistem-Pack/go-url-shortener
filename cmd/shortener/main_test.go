@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ func TestPostHandler(t *testing.T) {
 	handler := h.PostHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
+	ctx := context.WithValue(req.Context(), "userID", "test-user-id")
+	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "text/plain")
 	w := httptest.NewRecorder()
 
