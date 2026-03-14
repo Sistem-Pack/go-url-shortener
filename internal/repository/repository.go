@@ -33,6 +33,11 @@ func (p *PostgresStorage) Ping() error {
 	return p.DB.Ping()
 }
 
+type ResponseURL struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
 func OpenDatabase(dbConnectionString string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dbConnectionString)
 	if err != nil {
@@ -66,10 +71,10 @@ func RunMigrations(db *sql.DB) error {
 	return nil
 }
 
-func (p *PostgresStorage) SaveURL(ctx context.Context, id string, originalURL string) error {
-	query := `INSERT INTO urls (id, original_url) VALUES ($1, $2) ON CONFLICT (original_url) DO NOTHING`
+func (p *PostgresStorage) SaveURL(ctx context.Context, id string, originalURL string, userID string) error {
+	query := `INSERT INTO urls (id, original_url, user_id) VALUES ($1, $2, $3) ON CONFLICT (original_url) DO NOTHING`
 
-	result, err := p.DB.ExecContext(ctx, query, id, originalURL)
+	result, err := p.DB.ExecContext(ctx, query, id, originalURL, userID)
 	if err != nil {
 		return err
 	}
@@ -127,4 +132,29 @@ func (p *PostgresStorage) SaveBatch(ctx context.Context, data map[string]string)
 	}
 
 	return tx.Commit()
+}
+
+func (s *PostgresStorage) GetURLsByUserID(ctx context.Context, userID string) ([]ResponseURL, error) {
+	urls := make([]ResponseURL, 0)
+
+	rows, err := s.DB.QueryContext(ctx, "SELECT short_url, original_url FROM urls WHERE user_id = $1", userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u ResponseURL
+		err := rows.Scan(&u.ShortURL, &u.OriginalURL)
+		if err != nil {
+			return nil, err
+		}
+		urls = append(urls, u)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return urls, nil
 }
