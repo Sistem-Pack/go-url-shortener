@@ -307,6 +307,15 @@ func (h *Shortener) GetUserURLs() http.HandlerFunc {
 			return
 		}
 
+		for i := range urls {
+			urls[i].ShortURL, err = url.JoinPath(h.cfg.BaseURL, urls[i].ShortURL)
+			if err != nil {
+				log.Error().Err(err).Msg("Ошибка при создании короткой ссылки")
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(urls)
 	}
