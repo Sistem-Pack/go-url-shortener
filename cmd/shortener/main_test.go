@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ func TestPostHandler(t *testing.T) {
 	handler := h.PostHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
+	ctx := context.WithValue(req.Context(), config.UserIDKey, "test-user-id")
+	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "text/plain")
 	w := httptest.NewRecorder()
 
@@ -53,6 +56,8 @@ func TestPostJSONHandler(t *testing.T) {
 
 	jsonBody := `{"url":"https://practicum.yandex.ru/"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(jsonBody))
+	ctx := context.WithValue(req.Context(), config.UserIDKey, "test-user-id")
+	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
@@ -112,6 +117,8 @@ func TestPostHandlerEmptyBody(t *testing.T) {
 	h := handler.NewShortener(cfg, store, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
+	ctx := context.WithValue(req.Context(), config.UserIDKey, "test-user-id")
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	h.PostHandler()(w, req)

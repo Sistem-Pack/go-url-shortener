@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +19,7 @@ import (
 	"github.com/Sistem-Pack/go-url-shortener/internal/storage"
 	"github.com/Sistem-Pack/go-url-shortener/pkg/config"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/teris-io/shortid"
 )
@@ -52,7 +56,7 @@ func NewShortener(cfg *config.Config, store storage.URLStorage, db *repository.P
 	}
 }
 
-func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (string, error) {
+func (h *Shortener) createShortURL(ctx context.Context, originalURL string, userID string) (string, error) {
 	parsed, err := url.Parse(originalURL)
 	if err != nil || parsed.Host == "" {
 		return "", fmt.Errorf("некорректный URL")
@@ -67,7 +71,7 @@ func (h *Shortener) createShortURL(ctx context.Context, originalURL string) (str
 		}
 
 		if h.db != nil {
-			err = h.db.SaveURL(ctx, id, originalURL)
+			err = h.db.SaveURL(ctx, id, originalURL, userID)
 			if err == nil {
 				return url.JoinPath(h.cfg.BaseURL, id)
 			}
@@ -104,7 +108,13 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(req.Context(), originalURL)
+		userID, ok := req.Context().Value(config.UserIDKey).(string)
+		if !ok {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		shortURL, err := h.createShortURL(req.Context(), originalURL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
 
@@ -145,7 +155,8 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		shortURL, err := h.createShortURL(request.Context(), req.URL)
+		userID := request.Context().Value(config.UserIDKey).(string)
+		shortURL, err := h.createShortURL(request.Context(), req.URL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
 
@@ -280,14 +291,105 @@ func (h *Shortener) PostBatchHandler() http.HandlerFunc {
 	}
 }
 
+func (h *Shortener) GetUserURLs() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value(config.UserIDKey).(string)
+
+		urls, err := h.db.GetURLsByUserID(r.Context(), userID)
+		if err != nil {
+			log.Error().Err(err).Msg("Ошибка при получении URL из БД")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		if len(urls) == 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		for i := range urls {
+			urls[i].ShortURL, err = url.JoinPath(h.cfg.BaseURL, urls[i].ShortURL)
+			if err != nil {
+				log.Error().Err(err).Msg("Ошибка при создании короткой ссылки")
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(urls)
+	}
+}
+
+func (h *Shortener) EncryptUserID(userID string) string {
+	hMac := hmac.New(sha256.New, []byte(config.SecretKey))
+	hMac.Write([]byte(userID))
+	signature := hMac.Sum(nil)
+
+	return hex.EncodeToString(append([]byte(userID), signature...))
+}
+
+func (h *Shortener) DecryptUserID(signedValue string) (string, error) {
+	data, err := hex.DecodeString(signedValue)
+	if err != nil || len(data) < 36 {
+		return "", errors.New("некорректная кука")
+	}
+
+	userID := string(data[:36])
+	signature := data[36:]
+
+	hMac := hmac.New(sha256.New, []byte(config.SecretKey))
+	hMac.Write([]byte(userID))
+	expectedSignature := hMac.Sum(nil)
+
+	if !hmac.Equal(signature, expectedSignature) {
+		return "", errors.New("неправильная подпись")
+	}
+	return userID, nil
+}
+
+func (h *Shortener) AuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var userID string
+		var setCookie bool
+
+		cookie, err := r.Cookie("user_id")
+		if err != nil {
+			userID = uuid.New().String()
+			setCookie = true
+		} else {
+			userID, err = h.DecryptUserID(cookie.Value)
+			if err != nil {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if setCookie {
+			signedValue := h.EncryptUserID(userID)
+			http.SetCookie(w, &http.Cookie{
+				Name:     "user_id",
+				Value:    signedValue,
+				Path:     "/",
+				HttpOnly: true,
+			})
+		}
+
+		ctx := context.WithValue(r.Context(), config.UserIDKey, userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func NewRouter(cfg *config.Config, store storage.URLStorage, db *repository.PostgresStorage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.GzipLoggerMiddleware)
 	handler := NewShortener(cfg, store, db)
+	router.Use(handler.AuthMiddleware)
 	router.Post("/", handler.PostHandler())
 	router.Post("/api/shorten", handler.PostJSONHandler())
 	router.Post("/api/shorten/batch", handler.PostBatchHandler())
 	router.Get("/ping", handler.PingHandler())
 	router.Get("/{id}", handler.GetHandler())
+	router.Get("/api/user/urls", handler.GetUserURLs())
 	return router
 }
