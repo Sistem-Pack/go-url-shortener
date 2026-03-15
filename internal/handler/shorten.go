@@ -24,12 +24,6 @@ import (
 	"github.com/teris-io/shortid"
 )
 
-type ContextKey string
-
-const UserIDKey ContextKey = "userID"
-
-var secretKey = "9vU2OWQPdG7wnNYNb5WoTEkT5T3HiwM9hqpLLwBWm78="
-
 type Shortener struct {
 	cfg   *config.Config
 	store storage.URLStorage
@@ -114,7 +108,7 @@ func (h *Shortener) PostHandler() http.HandlerFunc {
 			return
 		}
 
-		userID, ok := req.Context().Value(UserIDKey).(string)
+		userID, ok := req.Context().Value(config.UserIDKey).(string)
 		if !ok {
 			http.Error(res, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -161,7 +155,7 @@ func (h *Shortener) PostJSONHandler() http.HandlerFunc {
 			return
 		}
 
-		userID := request.Context().Value(UserIDKey).(string)
+		userID := request.Context().Value(config.UserIDKey).(string)
 		shortURL, err := h.createShortURL(request.Context(), req.URL, userID)
 		if err != nil {
 			var conflictErr *repository.ErrConflict
@@ -299,7 +293,7 @@ func (h *Shortener) PostBatchHandler() http.HandlerFunc {
 
 func (h *Shortener) GetUserURLs() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Context().Value(UserIDKey).(string)
+		userID := r.Context().Value(config.UserIDKey).(string)
 
 		urls, err := h.db.GetURLsByUserID(r.Context(), userID)
 		if err != nil {
@@ -319,7 +313,7 @@ func (h *Shortener) GetUserURLs() http.HandlerFunc {
 }
 
 func (h *Shortener) EncryptUserID(userID string) string {
-	hMac := hmac.New(sha256.New, []byte(secretKey))
+	hMac := hmac.New(sha256.New, []byte(config.SecretKey))
 	hMac.Write([]byte(userID))
 	signature := hMac.Sum(nil)
 
@@ -335,7 +329,7 @@ func (h *Shortener) DecryptUserID(signedValue string) (string, error) {
 	userID := string(data[:36])
 	signature := data[36:]
 
-	hMac := hmac.New(sha256.New, []byte(secretKey))
+	hMac := hmac.New(sha256.New, []byte(config.SecretKey))
 	hMac.Write([]byte(userID))
 	expectedSignature := hMac.Sum(nil)
 
@@ -372,7 +366,7 @@ func (h *Shortener) AuthMiddleware(next http.Handler) http.Handler {
 			})
 		}
 
-		ctx := context.WithValue(r.Context(), UserIDKey, userID)
+		ctx := context.WithValue(r.Context(), config.UserIDKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

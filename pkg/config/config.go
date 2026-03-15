@@ -5,6 +5,11 @@ import (
 	"os"
 )
 
+type ContextKey string
+
+const UserIDKey ContextKey = "userID"
+const SecretKey = "9vU2OWQPdG7wnNYNb5WoTEkT5T3HiwM9hqpLLwBWm78="
+
 type Config struct {
 	Address            string
 	BaseURL            string
